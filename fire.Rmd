@@ -1,0 +1,177 @@
+---
+title: "Fire mapping"
+output: html_notebook
+---
+
+## Load libraries 
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(tidykml)
+library(stringr)
+library(ggplot2)
+library(gganimate)
+library(ggmap)
+```
+
+## Dates of fire
+
+```{r}
+dates = seq(lubridate::ymd("2020-08-13"), lubridate::ymd("2020_10_18"), by = "days")
+
+dates_no_hyphen = stringr::str_replace(stringr::str_replace(dates, "-", ""), "-", "")
+
+```
+
+## Latitude and longitude boundaries
+
+```{r}
+left_bound = -106
+right_bound = -105
+upper_bound = 40.836569
+lower_bound = 40.393849
+
+```
+
+# Download data from fsapps.nwcg.gov
+
+```{r}
+
+get_date_data = function(date){
+  
+  url_read = sprintf("https://fsapps.nwcg.gov/data/kml/conus_hist/conus_%s.kmz", date)
+  download_loc = sprintf("~/projects/fire/files/conus_%s.kmz", date)
+  
+  if(!file.exists(download_loc) | lubridate::ymd(date) == Sys.Date()){
+    
+    print(sprintf('getting data for %s', date))
+  
+    download.file(url_read, destfile = download_loc)
+    
+    unzip(sprintf("~/projects/fire/files/conus_%s.kmz", date), overwrite = T, 
+          exdir = sprintf("~/projects/fire/files/conus_%s", date))
+    
+    kml_file <- sprintf("~/projects/fire/files/conus_%s/conus.kml", date)
+    
+    file_save = sprintf("/Users/jmaddalena/projects/fire/files/conus_%s/processed.RDS", date)
+
+    print(sprintf("saving file for date %s...", date))
+    df = kml_polygons(kml_file) %>%
+      filter(latitude <= upper_bound & latitude >= lower_bound & 
+             longitude <= right_bound & longitude >= left_bound)
+    
+    saveRDS(df, file = file_save)
+    
+  }
+  
+}
+
+for(date_str in dates_no_hyphen){
+  get_date_data(date_str)
+}
+
+```
+
+# Read downloaded files and parse them
+
+```{r}
+
+get_substr = function(str_desc, before_str, after_str){
+  str_date_raw = str_extract(str_desc, sprintf("%s.*%s", before_str, after_str))
+  str_replace(str_replace(str_date_raw, before_str, ""), after_str, "")
+}
+
+read_and_create_df_date = function(date){
+  date_hyphen = lubridate::ymd(date)
+  
+  df_read = readRDS(sprintf("/Users/jmaddalena/projects/fire/files/conus_%s/processed.RDS", date))
+
+  df_read %>%
+    mutate(date_extract = get_substr(description,  "<b>Detection Date: </b>", "<br/> <b>Detection Time"),
+           time_extract = get_substr(description,  "<b>Detection Time: </b>", " UTC<br/>"),
+           confidence = as.numeric(get_substr(description, "<b>Confidence: </b>", "<br/> <b>Sensor")),
+           sensor = get_substr(description, "<b>Sensor: </b>", "<br/> <b>Source"),
+           source = get_substr(description, "<b>Source: </b>", " "),
+           date_val = lubridate::dmy(date_extract),
+           datetime_str = sprintf("%s %s", date_val, time_extract),
+           datetime = lubridate::ymd_hm(datetime_str)) %>%
+    filter(date_val == date_hyphen) %>%
+    select(date_val, time_extract, datetime, latitude, longitude, confidence, sensor, source) 
+}
+```
+
+
+
+```{r}
+all_dates_df = purrr::map_df(dates_no_hyphen, function(date_str){
+  read_and_create_df_date(date_str)
+}) %>% distinct 
+
+all_dates_df = all_dates_df %>%
+  mutate(group = rep(seq(1, nrow(all_dates_df)/4), each = 4)) %>%
+  group_by(date_val, datetime, group) %>%
+  summarize(latitude = mean(latitude),
+            longitude = mean(longitude),
+            confidence = mean(confidence))
+
+View(all_dates_df)
+```
+
+# MAPPING
+
+Must get a GCP Google Maps API key in order to use the ggmaps library.
+
+```{r}
+#register_google(key = "<my_key>", write = T)
+```
+
+# Get background map
+
+Was not able to get the ideal zoom without customization and specifying plot limits. 
+
+```{r}
+
+fire_map = get_map(location = c(lon = mean(c(left_bound, right_bound)), 
+                                lat = mean(c(lower_bound, upper_bound))),
+                zoom = 9,  maptype = "terrain",  source = "google", color = "color")
+
+### customization ####
+map_attr <- attributes(fire_map)
+
+fire_map_transparent <- matrix(adjustcolor(fire_map, alpha.f = 0.6), 
+                                    nrow = nrow(fire_map))
+
+attributes(fire_map_transparent) <- map_attr
+#######################
+
+fire_ggmap = ggmap(fire_map_transparent) +
+  scale_x_continuous(limits = c(left_bound, right_bound)) +
+  scale_y_continuous(limits = c(lower_bound, upper_bound))
+
+fire_ggmap
+
+
+```
+
+# Generate final map
+
+```{r}
+map_animate = fire_ggmap + 
+  geom_point(data = all_dates_df, color = "darkorange1", shape = 19, 
+             aes(x = longitude, y = latitude, alpha = confidence), size = 3) +
+  transition_time(datetime) +
+  labs(x = "", y = "", title = "Cameron Peak Fire detections from MODIS satellite imagery", subtitle = '{as.Date(frame_time, "%Y-%m-%d")}') +
+  shadow_mark(fill = "black", color = "black", alpha = alpha/3) +
+  theme(legend.position = "none", 
+        axis.text.x=element_blank(), axis.text.y=element_blank(), 
+        axis.ticks.x=element_blank(), axis.ticks.y=element_blank(), 
+        plot.title = element_text(size = 25),
+        plot.subtitle = element_text(size = 20))
+
+animate(map_animate, fps = 4, start_pause = 3, end_pause = 20, height = 474, width = 700)
+
+anim_save("~/projects/fire/fire_map.gif")
+```
+
+
