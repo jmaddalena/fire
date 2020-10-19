@@ -41,7 +41,7 @@ lower_bound = 40.393849
 get_date_data = function(date){
   
   url_read = sprintf("https://fsapps.nwcg.gov/data/kml/conus_hist/conus_%s.kmz", date)
-  download_loc = sprintf("~/projects/fire/files/conus_%s.kmz", date)
+  download_loc = sprintf("./files/conus_%s.kmz", date)
   
   if(!file.exists(download_loc) | lubridate::ymd(date) == Sys.Date()){
     
@@ -49,12 +49,12 @@ get_date_data = function(date){
   
     download.file(url_read, destfile = download_loc)
     
-    unzip(sprintf("~/projects/fire/files/conus_%s.kmz", date), overwrite = T, 
-          exdir = sprintf("~/projects/fire/files/conus_%s", date))
+    unzip(sprintf("./files/conus_%s.kmz", date), overwrite = T, 
+          exdir = sprintf("./files/conus_%s", date))
     
-    kml_file <- sprintf("~/projects/fire/files/conus_%s/conus.kml", date)
+    kml_file <- sprintf("./files/conus_%s/conus.kml", date)
     
-    file_save = sprintf("/Users/jmaddalena/projects/fire/files/conus_%s/processed.RDS", date)
+    file_save = sprintf("./fire/files/conus_%s/processed.RDS", date)
 
     print(sprintf("saving file for date %s...", date))
     df = kml_polygons(kml_file) %>%
@@ -85,7 +85,7 @@ get_substr = function(str_desc, before_str, after_str){
 read_and_create_df_date = function(date){
   date_hyphen = lubridate::ymd(date)
   
-  df_read = readRDS(sprintf("/Users/jmaddalena/projects/fire/files/conus_%s/processed.RDS", date))
+  df_read = readRDS(sprintf("./files/conus_%s/processed.RDS", date))
 
   df_read %>%
     mutate(date_extract = get_substr(description,  "<b>Detection Date: </b>", "<br/> <b>Detection Time"),
@@ -171,7 +171,7 @@ map_animate = fire_ggmap +
 
 animate(map_animate, fps = 4, start_pause = 3, end_pause = 20, height = 474, width = 700)
 
-anim_save("~/projects/fire/fire_map.gif")
+anim_save("./fire_map.gif")
 ```
 
 
